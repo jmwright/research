@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Soil moisture — stacked cycle rings</title>
+<style>
+  :root { --bg:#0d141b; --panel:#161f29; --hair:#293643; --text:#e7edf2; --muted:#8a9aa8; --accent:#f2a93b; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text);
+    font-family: system-ui, sans-serif; overflow:hidden; }
+  #panel { position:absolute; top:12px; left:12px; z-index:10; width:250px;
+    background:rgba(22,31,41,0.92); border:1px solid var(--hair); border-radius:10px;
+    padding:14px; font-size:13px; }
+  #panel h1 { font-size:14px; margin:0 0 10px; font-weight:600; }
+  .row { margin:9px 0; }
+  .row label { display:block; color:var(--muted); margin-bottom:3px; font-size:11px;
+    text-transform:uppercase; letter-spacing:.04em; }
+  input[type=range] { width:100%; accent-color:var(--accent); }
+  input[type=number], select { width:100%; background:var(--bg); color:var(--text);
+    border:1px solid var(--hair); border-radius:6px; padding:5px; }
+  .inline { display:flex; align-items:center; gap:8px; }
+  .inline input[type=checkbox] { accent-color:var(--accent); }
+  #readout { color:var(--muted); font-size:11px; line-height:1.5; margin-top:8px;
+    border-top:1px solid var(--hair); padding-top:8px; }
+  #hint { position:absolute; bottom:10px; left:12px; color:var(--muted); font-size:11px; z-index:10; }
+</style>
+</head>
+<body>
+<div id="panel">
+  <h1>Stacked cycle rings</h1>
+  <div class="row">
+    <label>cycle length (hours)</label>
+    <input type="number" id="cycleHours" value="24" min="1" step="0.5">
+  </div>
+  <div class="row">
+    <label>color by</label>
+    <select id="colorBy"><option value="moisture">moisture</option>
+      <option value="temp">temperature</option></select>
+  </div>
+  <div class="row">
+    <label>highlight day</label>
+    <input type="range" id="daySlider" min="0" max="0" value="0">
+  </div>
+  <div class="row inline">
+    <input type="checkbox" id="showAvg"><label style="margin:0;text-transform:none;letter-spacing:0">show "typical day" ring</label>
+  </div>
+  <div class="row inline">
+    <input type="checkbox" id="dimOthers"><label style="margin:0;text-transform:none;letter-spacing:0">isolate highlighted day</label>
+  </div>
+  <div id="readout"></div>
+</div>
+<div id="hint">drag to orbit · scroll to zoom · radius = moisture, up = later days</div>
+
+<script src="rings.js"></script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

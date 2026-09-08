@@ -1,0 +1,12 @@
+{
+  "name": "soil-cycle-visualizer",
+  "version": "1.0.0",
+  "description": "3D stacked-cycle-ring visualizer for soil moisture/temperature logs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
