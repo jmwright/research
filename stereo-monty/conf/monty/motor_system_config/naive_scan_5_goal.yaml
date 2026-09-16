@@ -44,7 +44,12 @@ policy_selector:
     _target_: ${monty.class:stereo_policies.RescanningNaiveScanPolicy}
     agent_id: agent_id_0
     fixed_amount: 5
-    rescan_after_jump: false
+    # Restart the spiral centred on the new pose after a kept jump, rather than
+    # resuming at whatever arm length it had reached. A spiral action is a
+    # *relative* rotation, so resuming walks the sensor away from the viewpoint the
+    # goal just chose - it spends the viewpoint before looking at it. Settled at
+    # true; false is the measured alternative.
+    rescan_after_jump: true
     action_sampler:
       _target_: tbp.monty.frameworks.actions.action_samplers.ConstantSampler
       actions:

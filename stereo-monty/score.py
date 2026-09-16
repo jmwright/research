@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Score a gate run: one line per object, three rotations each, then the totals.
 
 `result` holds the object the episode terminated on, and is empty on a time out.

@@ -85,24 +85,36 @@ experiment:
           save_raw_obs: false
       learning_modules:
         learning_module_0:
+          # Lets the learning module see a null observation at all. Without it the
+          # sensor module drops off-object percepts before the LM is consulted and
+          # every option below is inert.
           process_off_object: true
+          # Keeps goal generation alive once the spiral has left the object.
+          # `propose_goals` otherwise gates on a flag that reads false for any
+          # off-object percept, so goals stop being proposed the moment the scan
+          # marches off - and the scan never comes back.
+          goals_from_off_object: true
+          max_match_distance: 0.01
           hypotheses_updater_args:
-            # The penalty, in the units evidence uses elsewhere ([-1, 2],
-            # hypotheses_displacer.py:40). 0.0 exercises the whole null path and
-            # scores nothing, which is what inert4_rig_* proves: opening the gate
-            # changes no result. The stage 4 sweep ran 0.01 and 1.0, two orders
-            # apart, and both reach the correct verdict, so the disconfirmation is
-            # a property of the geometry rather than a tuned constant.
+            # How many null observations must pass through a hypothesis before it
+            # is refuted outright rather than penalised. This is the mechanism.
+            # 0 disables it and reproduces stock behaviour exactly.
             #
-            # **0.01 is settled - do not retune it for the generalisation test**,
-            # which would forfeit the point of the sweep. 1.0 reorders hypotheses
-            # mid-episode (the glass capture's eventual winner is behind for its
-            # first 57 steps) and stage 5's rebase does not change that; it only
-            # stops 1.0 destroying a third object's hypothesis space.
-            off_object_contradiction: 1.0
-            # Whether a null observation is tested as a ray rather than a point.
-            # False reproduces every result through stage 5.
-            off_object_ray_carve: false
+            # 1 and 3 both score 15 of 15. 2 and 5 are worse, non-monotonically,
+            # which is path dependence rather than a tuning curve - refutation
+            # moves the leading hypothesis, which moves the goals, which moves the
+            # trajectory. 3 is the settled value.
+            off_object_refutation_strikes: 3
+            # Whether a null observation is tested as a ray rather than a point. A
+            # void pixel does not assert "no surface at this depth", it asserts "no
+            # surface anywhere along this ray". Required: this is what computes the
+            # strike above.
+            off_object_ray_carve: true
+            # The graded penalty, in the units evidence uses elsewhere ([-1, 2]).
+            # Refutation does not replace it and it still carries weight - at 0.0
+            # with refutation on, the score falls to 13 of 15 as the bar loses two
+            # rotations. The glass keeps all three either way.
+            off_object_contradiction: 4.0
     show_sensor_output: false
     max_train_steps: 1000
     max_eval_steps: 4000

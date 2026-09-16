@@ -11,7 +11,7 @@ observation - so `rig_mug` is never eliminated, the terminal condition never fir
 the episode runs to its step ceiling with two objects still alive. The correct object
 leads the whole way. What is missing is a way to *stop*.
 
-This is Thousand Brains' own worked example, written up as two Future Work items,
+Thousand Brains Project is aware of this issue, and has written up two Future Work items on the topic,
 [Use Off Object Observations](https://docs.thousandbrains.org/docs/use-off-object-observations)
 and [Use Out of Model Movements](https://docs.thousandbrains.org/docs/use-out-of-model-movements),
 both approved and both unimplemented.
@@ -24,16 +24,25 @@ same configuration without the change.
 
 Every disconfirmation mechanism tried before this one fed the null observation back into
 *continuous evidence*: a hypothesis that predicted surface where the sensor found none
-lost points. That cannot finish. An object scores the **max** over its hypotheses, so
-knocking the leader down just promotes the runner-up - and the runners-up are dense, with
-the best and second-best differing by 0.02 in one measured case.
+lost points. That cannot finish, and the reason is worth being precise about.
+
+A hypothesis is a pair - *this object, at this pose* - and an object scores the **max**
+over its hypotheses. So `rig_mug`'s score is set by whichever mug pose currently fits
+best. The mug is a body of revolution, so a great many rotations about its axis explain a
+glass's observations almost equally well, and the pose space is densely packed with
+near-identical candidates: in one measured run the best azimuth bin scored 32.693 and the
+second 32.670, a gap of **0.02**. Penalising the leading pose therefore barely moves the
+object's score - the candidate 0.02 behind it simply becomes the new maximum. Behind that
+one is another.
 
 **Refutation changes the operator instead of the magnitude.** Count how many null
 observations have passed through the volume a hypothesis says is solid, and at a
-threshold remove that hypothesis *permanently*. Accumulated support becomes irrelevant:
-300 body observations of a 781-node graph cannot save a pose whose predicted surface has
-been looked through. The twin is killed too, and the one after that, and the pose space
-is finite - so the stalemate turns into an exhaustion.
+threshold remove that hypothesis *permanently* rather than lowering its score.
+Accumulated support becomes irrelevant: 300 body observations of a 781-node graph cannot
+save a pose whose predicted surface has been looked through. The near-identical candidate
+behind it is removed next, and the one behind that, and the supply is finite - 398 mug
+hypotheses in the glass run, all 398 refuted by the end. The stalemate becomes an
+exhaustion.
 
 Two details that matter:
 
@@ -71,15 +80,27 @@ You need the fork of tbp.monty that carries the mechanism:
 git clone -b use-off-object-observations https://github.com/jmwright/tbp.monty
 ```
 
-Follow tbp.monty's own [installation
-instructions](https://thousandbrainsproject.readme.io/docs/getting-started) for the
-environment - this needs nothing on top of it. Then, from anywhere:
+Install it with tbp.monty's own [installation
+instructions](https://thousandbrainsproject.readme.io/docs/getting-started). Nothing
+extra is needed on top - no dependency here that tbp.monty does not already pull in.
+
+**Then activate that Monty environment before running anything below.**
 
 ```
+conda activate tbp.monty        # or whatever you named it
+cd <this directory>
 ./run_gate.sh <tbp.monty checkout> <output dir>
 ```
 
-which runs five objects at three rotations each and prints:
+`run_gate.sh` checks for a working interpreter up front and stops with an explanation if
+it cannot find one. If your interpreter is somewhere
+it will not find, point at it directly:
+
+```
+PYTHON=/path/to/env/bin/python ./run_gate.sh <tbp.monty checkout> <output dir>
+```
+
+It runs five objects at three rotations each - a few minutes in total - and prints:
 
 ```
 mug    correct(26) | correct(86) | correct(26)
@@ -105,19 +126,33 @@ policy, with only the strike threshold at zero.
 
 ### The knob
 
-One parameter, on the learning module's hypotheses updater:
+Everything that defines the method is in
+[`conf/experiment/rig_eval_sim_goal.yaml`](conf/experiment/rig_eval_sim_goal.yaml),
+under `learning_modules.learning_module_0`, and each value is commented there with what
+it costs to change it:
 
+```yaml
+process_off_object: true          # the LM sees nulls at all - everything else is inert without it
+goals_from_off_object: true       # goal generation survives the scan leaving the object
+max_match_distance: 0.01
+hypotheses_updater_args:
+  off_object_refutation_strikes: 3   # the mechanism; 0 reproduces stock behaviour exactly
+  off_object_ray_carve: true         # required - this is what computes a strike
+  off_object_contradiction: 4.0      # the graded penalty, which refutation does not replace
 ```
-hypotheses_updater_args.off_object_refutation_strikes: 3
-```
 
-`0` disables it and reproduces stock behaviour exactly. It requires
-`off_object_ray_carve: true`, which is what computes the strike, and
-`process_off_object: true`, which is what lets the learning module see a null at all.
-It does **not** replace `off_object_contradiction`; the penalty still runs underneath
-and is load-bearing for one of the five objects.
+plus `rescan_after_jump: true` in
+[`conf/monty/motor_system_config/naive_scan_5_goal.yaml`](conf/monty/motor_system_config/naive_scan_5_goal.yaml).
 
-Each matching step logs a greppable line, one entry per object in the library:
+`run_gate.sh` does **not** override any of these - it passes only the strike threshold
+and step budget it takes as arguments, plus the object, library, model and rotations the
+gate itself defines.
+
+The penalty is worth a word, because refutation does not replace it: at
+`off_object_contradiction: 0.0` with refutation on, the score falls to 13 of 15 as the
+bar loses two rotations. The glass keeps all three either way.
+
+Each matching step logs a line, one entry per object in the library:
 
 ```
 refutation: rig_mug 391/398 650.160 | rig_glass 183/363 683.496
@@ -136,14 +171,14 @@ climb is the clearest view of the mechanism there is.
 | `conf/` | Hydra configs - `rig_eval_sim_goal` is the settled one |
 | `stereo_policies.py` | `RescanningNaiveScanPolicy`, resolved by name from the motor config |
 | `libraries/` | the two object libraries, built and committed |
-| `cad/` | the CadQuery sources the five test objects were printed from |
+| `cad/` | the [CadQuery](https://cadquery.org) sources for all five test objects |
 | `models/` | pretrained models for both libraries |
 | `make_object_library.py` | STL directory to a Habitat object library |
 | `compare_excursions.py` | run-log analysis used while developing this |
 
 ### The objects
 
-Five printed parts, in two libraries, chosen so that each isolates one thing:
+Five objects in two libraries, chosen so that each isolates one thing:
 
 | object | library | why it is here |
 |---|---|---|
@@ -158,9 +193,20 @@ than a *protrusion*, and with the pose space collapsed 13-fold by making that vo
 rotationally symmetric. It is the harder of the two and remains the fragile one - see
 the caveats.
 
-Because these were printed, the library is **ground-truth CAD geometry rather than a
-reconstruction**. Rebuilding it is optional; the `.glb` files under `libraries/` are
-committed and every number here is tied to those exact meshes.
+**The two groups have different origins and it is worth being clear about which.** The
+mug, glass and block are physical parts: printed in PETG, with a boss and hole for the
+dowel they sit on, and photographed on a stereo rig. The bar and the i were created purely
+to test this method and have never been printed - they have no dowel features, and the i
+could not be printed as designed in any case, since its dot floats unsupported above the
+stem.
+
+Either way the library is **ground-truth CAD geometry rather than a reconstruction** - a recognition result is not being scored
+against a scan of the object with its own errors in it. For the three printed parts that
+is a stronger claim than for the other two, because there is a physical object and it was
+made from exactly this geometry.
+
+Rebuilding is optional; the `.glb` files under `libraries/` are committed and every
+number here is tied to those exact meshes.
 
 ### Rebuilding, if you want to
 
@@ -192,7 +238,7 @@ and the same again with `libraries/rig_letters`, `[rig_bar,rig_i]` and
 `run_name=rig_letters_surf_agent`. The two run names are what `run_gate.sh` looks for
 under `models/`, so keep them or edit the script.
 
-## Caveats, in order of how much they should bother you
+## Caveats
 
 **This is simulation, and the agent moves.** The policy teleports a distant agent around
 the object. Read back from one glass run's own goal trace: 17 achieved goals spanning
@@ -219,8 +265,7 @@ for the easy cases.
 
 **Three or five alternatives is a thin recognition task.** How this behaves against a
 library of a hundred objects is untested. A single ray refutes many hypotheses across
-many objects at once, so it should not scale badly, but "should not" is doing real work
-in that sentence.
+many objects at once, so (in theory) it should scale acceptably, but that needs to be verified.
 
 **It departs from the approved design.** Thousand Brains' RFCs specify a *penalty* for an
 off-object observation, not an elimination. This is the same diagnosis with a harder
@@ -243,9 +288,10 @@ pose and says nothing whatever about a glass pose.
 
 ## Provenance
 
-The rig this came from is a two-camera ESP32-CAM stereo trap; the five objects are
-printed parts photographed on it. None of that is needed here - this directory is
-self-contained and runs entirely in Habitat.
+The rig this came from is a two-camera ESP32-CAM stereo trap, and the mug, glass and
+block are printed parts that were photographed on it. The bar and the i never left CAD.
+None of that is needed here - this directory is self-contained and runs entirely in
+Habitat.
 
 The mechanism lives on the `use-off-object-observations` branch of
 [jmwright/tbp.monty](https://github.com/jmwright/tbp.monty), in
