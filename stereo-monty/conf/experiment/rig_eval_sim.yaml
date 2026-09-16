@@ -39,6 +39,16 @@ defaults:
 experiment:
   _target_: tbp.monty.frameworks.experiments.object_recognition_experiments.MontyObjectRecognitionExperiment
   config:
+    monty_config:
+      sensor_modules:
+        # 4000 steps of raw observations will exhaust memory during
+        # `save_state_dir`, *after* the episode has finished and eval_stats.csv has
+        # been written - so the result survives and the process is killed anyway.
+        # Nothing here needs them.
+        sensor_module_0:
+          save_raw_obs: false
+        sensor_module_1:
+          save_raw_obs: false
     show_sensor_output: false
     max_train_steps: 1000
     # The rig runs need thousands of steps once a near miss is in the library; do
