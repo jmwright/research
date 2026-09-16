@@ -1,0 +1,137 @@
+# @package _global_
+#
+# Stage 6: the same spiral, plus a policy that can aim.
+#
+# Everything through stage 5 was scored on a walk that ignores `percept` - chosen
+# deliberately, because a viewpoint-agnostic walk is what lets two objects be
+# compared step by step. The saturation sweep then located the limit somewhere that
+# walk cannot reach: the wrong object's evidence stops responding to the penalty at
+# 2.0 and misses the termination band by 0.274, because the surviving hypothesis is
+# a pose no sampled ray ever refutes. If the limit is *which* hypotheses the
+# observations reach, the lever is the choice of viewpoint, not the disconfirmation
+# code.
+#
+# Monty already has the machinery and it was blocked in three places, two silently:
+#
+# 1. `NaiveScanPolicy.__call__` overrides `InformedPolicy.__call__` and ignores its
+#    `goal` argument, so `use_goal_driven_actions: true` on `naive_scan_5` does
+#    nothing. Fixed here by composition, not by patching - see
+#    `naive_scan_5_goal.yaml`.
+# 2. `gsg0` in the learning-module name means no goal generator exists. See
+#    `rig_evidence_1lm_nn10_dod003_dts02_gsg1.yaml`.
+# 3. `EvidenceGoalGenerator.min_post_goal_success_steps` defaults to `np.inf`,
+#    which disables hypothesis testing even when a generator is present. Also in
+#    that file.
+#
+# This is `rig_eval_sim_leave_object.yaml` with those two options swapped and
+# nothing else touched, so the library, the matching, the penalty, the transform
+# and the starting pose are all held from stage 5. Diff the two files before
+# believing any result from this one.
+#
+# **Goals are only proposed on on-object steps, and that is not a bug.**
+# `propose_goals` requires `buffer.get_last_obs_processed()`, which
+# `_step_learning_modules` sets from `is_location_only_step` - false on an
+# off-object percept whatever `process_off_object` says. The GSG computes the goal
+# location from the current percept's own location, so a void percept has nothing
+# to anchor it to. The consequence to watch: the spiral marches outward
+# monotonically, so the on-object steps are all early, and a run that never keeps a
+# jump gets no second chance at one.
+#
+# **The step budget is unchanged on purpose.** `NaiveScan` ends the episode at
+# k*(k-1)+1 = 307 steps, and a jump plus its undo costs two of them, so the goal
+# runs trade spiral coverage for aimed coverage rather than being handed extra
+# steps. That is the comparison worth making. Run `MaxTotalSteps` with a larger
+# budget separately if the question is what the policy does unconstrained.
+#
+#   python run.py --config-dir <this repo>/depth/monty/conf \
+#     experiment=rig_eval_sim_goal \
+#     experiment.config.environment.env_init_args.data_path=$MONTY_DATA/rig_letters \
+#     ++experiment.config.eval_env_interface_args.object_names=[rig_i] \
+#     experiment.config.model_name_or_path=<model>/pretrained/ \
+#     experiment.config.logging.output_dir=<results>
+defaults:
+  - /monty: graph_exp1000_emin_t3
+  - /monty/motor_system_config: naive_scan_5_goal
+  - /monty/learning_module: rig_evidence_1lm_nn10_dod003_dts02_gsg1
+  - /monty/sensor_module: camera_dist
+  - /monty/connectivity: 1lm_1sm
+  - /environment: habitat_numentalab_dist_agent_semantics0
+  - /env_interface: eval_distinctobj_predefined
+  - /env_interface/positioning_procedures_eval: getgoodview_fixed_pose
+  - /env_interface/transform: missing_depthto3d_sensor2_semantic0
+  - /logging: basic_info_evidence_eval_runs
+
+experiment:
+  _target_: tbp.monty.frameworks.experiments.object_recognition_experiments.MontyObjectRecognitionExperiment
+  config:
+    environment:
+      env_init_args:
+        agents:
+          agent_args:
+            position: [0.0, 1.5, 0.15]
+    monty_config:
+      sensor_modules:
+        sensor_module_0:
+          save_raw_obs: false
+          # Stage 3 ran four combinations of these two, one per pair of runs, and
+          # each is a different question. Both false is the identity check
+          # (`substoff_`): the new parameters must reproduce `base048_` exactly.
+          # Substitution on, probe off (`subston_`) isolates the depth move - read
+          # it with `compare_excursions.py --depths`. Both on (`offobj_`) is the
+          # measurement, read with `--in-model`. The file is left in that last
+          # state because it is the one the recorded result came from.
+          substitute_off_object_depth: true
+        sensor_module_1:
+          save_raw_obs: false
+      learning_modules:
+        learning_module_0:
+          process_off_object: true
+          hypotheses_updater_args:
+            # The penalty, in the units evidence uses elsewhere ([-1, 2],
+            # hypotheses_displacer.py:40). 0.0 exercises the whole null path and
+            # scores nothing, which is what inert4_rig_* proves: opening the gate
+            # changes no result. The stage 4 sweep ran 0.01 and 1.0, two orders
+            # apart, and both reach the correct verdict, so the disconfirmation is
+            # a property of the geometry rather than a tuned constant.
+            #
+            # **0.01 is settled - do not retune it for the generalisation test**,
+            # which would forfeit the point of the sweep. 1.0 reorders hypotheses
+            # mid-episode (the glass capture's eventual winner is behind for its
+            # first 57 steps) and stage 5's rebase does not change that; it only
+            # stops 1.0 destroying a third object's hypothesis space.
+            off_object_contradiction: 1.0
+            # Whether a null observation is tested as a ray rather than a point.
+            # False reproduces every result through stage 5.
+            off_object_ray_carve: false
+    show_sensor_output: false
+    max_train_steps: 1000
+    max_eval_steps: 4000
+    max_total_steps: 6000
+    n_train_epochs: 3
+    n_eval_epochs: 1
+    model_name_or_path: ''
+    match_criterion:
+      _target_: tbp.monty.experiment.match_criteria.AnyLMsMatch
+      # One LM, so a count of two is never satisfied and the episode ends only when
+      # the NaiveScan recognition policy reaches 307 steps. The spiral has to run to
+      # the end for both objects, or the step-by-step comparison has nothing to
+      # align - stage 1 measures where the sensor went, not what Monty concluded.
+      count: 2
+    recognition_policy:
+      # Ends the episode itself at k*(k-1)+1 = 307 steps for k = ceil(90/5), which is
+      # the spiral's own length. Upstream now computes what we used to cap by hand.
+      _target_: tbp.monty.experiment.recognition_policy.NaiveScan
+      fixed_amount: 5
+      max_total_steps: 6000
+    seed: 42
+    supervised_lm_ids: []
+    eval_env_interface_args:
+      object_names:
+        # File is run twice, once for mug and once for glass
+        - rig_glass
+      object_init_sampler:
+        _target_: tbp.monty.frameworks.environments.object_init_samplers.Predefined
+        rotations:
+          - [0, 0, 0]
+    logging:
+      run_name: rig_eval_sim_goal

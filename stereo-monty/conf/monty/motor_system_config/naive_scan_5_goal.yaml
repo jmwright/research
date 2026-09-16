@@ -1,0 +1,55 @@
+# @package experiment.config.monty_config.motor_system_config
+
+# The stage 1 spiral, with goal execution bolted on beside it rather than into it.
+#
+# `NaiveScanPolicy.__call__` overrides `InformedPolicy.__call__` and ignores its
+# `goal` argument outright (`# noqa: ARG002`), so `use_goal_driven_actions: true`
+# on `naive_scan_5` does nothing at all, silently. That is the first of the two
+# blockers recorded at the end of stage 5.
+#
+# It does not need patching. `DistantPolicySelector` already composes a
+# `JumpToGoal` policy with an arbitrary `default` policy: on a step where the LM's
+# GSG proposes a goal the jump policy runs, on every other step the default does.
+# Upstream pairs it with `InformedPolicyRandomWalk` in `distant_5.yaml`; the only
+# change here is the default.
+#
+# Two properties fall out of that composition for free, and both matter:
+#
+# - **The spiral is not disturbed by the jumps.** `check_cycle_action` advances only
+#   when `NaiveScanPolicy` is actually called, so a jump step and an undo step do
+#   not consume spiral steps. The walk is the same walk, interrupted.
+# - **A failed jump costs one step and is undone.** `JumpToGoal._should_undo` fires
+#   when the view finder's central depth is >= 1.0 m, i.e. the agent jumped to face
+#   a place where the object is not. The observation at that pose is still taken and
+#   still reaches the LM, which is the whole point: it is a *targeted* off-object
+#   probe rather than one the spiral happened to land on.
+#
+# What is not free is the anchor. After a jump that is kept, the spiral resumes at
+# whatever arm length it had reached, so it immediately walks away from the
+# viewpoint the goal just chose. See `rescan_after_jump` in
+# `RescanningNaiveScanPolicy` for the alternative, which is measured separately.
+
+_target_: tbp.monty.frameworks.models.motor_system.MotorSystem
+policy_selector:
+  _target_: tbp.monty.frameworks.models.motor_policy_selectors.DistantPolicySelector
+  jump_to_goal:
+    _target_: ${monty.class:tbp.monty.frameworks.models.motor_policies.JumpToGoal}
+    agent_id: agent_id_0
+    sensor_id: view_finder
+  look_at_goal:
+    _target_: ${monty.class:tbp.monty.frameworks.models.salience.motor_policy.LookAtGoal}
+    agent_id: agent_id_0
+    sensor_id: view_finder
+  default:
+    _target_: ${monty.class:stereo_policies.RescanningNaiveScanPolicy}
+    agent_id: agent_id_0
+    fixed_amount: 5
+    rescan_after_jump: false
+    action_sampler:
+      _target_: tbp.monty.frameworks.actions.action_samplers.ConstantSampler
+      actions:
+      - ${monty.class:tbp.monty.frameworks.actions.actions.LookUp}
+      - ${monty.class:tbp.monty.frameworks.actions.actions.LookDown}
+      - ${monty.class:tbp.monty.frameworks.actions.actions.TurnLeft}
+      - ${monty.class:tbp.monty.frameworks.actions.actions.TurnRight}
+      rotation_degrees: 5.0

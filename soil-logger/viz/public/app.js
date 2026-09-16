@@ -7,9 +7,18 @@ const H = 1.3;              // vertical spacing between day rings
 const GAP = 0.06;           // phase gap above which we break the line (a data gap)
 const AVG_BINS = 64;
 
-let rows = [];              // parsed CSV
-let state = { cycleHours: 24, colorBy: "moisture", day: 0, showAvg: false, dimOthers: false };
+let rows = [];              // parsed CSV, in file order
+let state = {
+  cycleMode: "watering",    // "watering" | "clock"
+  cycleHours: 24,
+  minRise: 60,
+  frame: "absolute",        // "absolute" | "relative"
+  phase: "normalized",      // "normalized" | "elapsed"
+  colorBy: "moisture", day: 0, showAvg: false, dimOthers: false,
+};
 let built = null;
+let waterings = [];
+let backwardSteps = 0;
 let ringGroup, avgGroup;
 
 // ---- scene ----
@@ -40,11 +49,21 @@ function norm(v, range) {
   return hi > lo ? (v - lo) / (hi - lo) : 0.5;
 }
 
-function pointXYZ(phase, moisture, cycleIdx, nCycles) {
+function pointXYZ(phase, value, cycleIdx, nCycles) {
   const theta = phase * Math.PI * 2;
-  const r = BASE_R + norm(moisture, built.moisture) * R_SCALE;
+  const r = BASE_R + norm(value, built.value) * R_SCALE;
   const y = (cycleIdx - (nCycles - 1) / 2) * H;   // center the stack on origin
   return [r * Math.cos(theta), y, r * Math.sin(theta)];
+}
+
+/* Slice the series into cycles under the current mode, then wrap them into
+   rings under the current reference frame. Kept separate from rebuild() so the
+   slider can ask how many cycles there are without touching the scene. */
+function computeRings() {
+  const cycles = state.cycleMode === "watering"
+    ? RingLib.buildCyclesFromWaterings(rows, waterings)
+    : RingLib.buildCyclesFromClock(rows, state.cycleHours * 3600);
+  return RingLib.buildRings(cycles, { phase: state.phase, frame: state.frame });
 }
 
 function rebuild() {
@@ -53,9 +72,9 @@ function rebuild() {
   ringGroup = new THREE.Group();
   avgGroup = new THREE.Group();
 
-  built = RingLib.buildRings(rows, state.cycleHours * 3600);
+  built = computeRings();
   const n = built.rings.length;
-  const colorRange = state.colorBy === "temp" ? built.temp : built.moisture;
+  const colorRange = state.colorBy === "temp" ? built.temp : built.value;
 
   built.rings.forEach((ring, idx) => {
     const highlighted = idx === state.day;
@@ -65,8 +84,8 @@ function rebuild() {
       if (seg.length < 2) continue;
       const pos = [], col = [];
       for (const p of seg) {
-        const v = state.colorBy === "temp" ? p.temp : p.moisture;
-        const [x, y, z] = pointXYZ(p.phase, p.moisture, idx, n);
+        const v = state.colorBy === "temp" ? p.temp : p.value;
+        const [x, y, z] = pointXYZ(p.phase, p.value, idx, n);
         pos.push(x, y, z);
         const c = colormap(norm(v, colorRange));
         col.push(c.r, c.g, c.b);
@@ -80,14 +99,14 @@ function rebuild() {
     }
   });
 
-  // "typical day" average ring, drawn just below the stack in white
+  // "typical cycle" average ring, drawn just below the stack in white
   if (state.showAvg && n > 0) {
     const avg = RingLib.averageRing(built.rings, AVG_BINS);
     const pos = [];
     const yBase = (-(n - 1) / 2 - 1.5) * H;
     for (const p of avg.concat([avg[0]])) {
       const theta = p.phase * Math.PI * 2;
-      const r = BASE_R + norm(p.moisture, built.moisture) * R_SCALE;
+      const r = BASE_R + norm(p.value, built.value) * R_SCALE;
       pos.push(r * Math.cos(theta), yBase, r * Math.sin(theta));
     }
     const g = new THREE.BufferGeometry();
@@ -106,29 +125,69 @@ function rebuild() {
   updateReadout();
 }
 
+function fmt(t) { return new Date(t * 1000).toISOString().slice(0, 16).replace("T", " "); }
+
 function updateReadout() {
   const n = built.rings.length;
-  const day = built.rings[state.day];
+  const ring = built.rings[state.day];
   const el = document.getElementById("readout");
-  let when = "-";
-  if (day && day.points.length) {
-    when = new Date(day.points[0].t * 1000).toISOString().slice(0, 10);
+  const unit = state.frame === "relative" ? " counts vs shelf" : " counts";
+  const lines = [
+    "cycles: " + n + (state.cycleMode === "watering" ? " (" + waterings.length + " waterings found)" : ""),
+    "radius: " + built.value[0].toFixed(0) + " – " + built.value[1].toFixed(0) + unit,
+    "temp: " + built.temp[0].toFixed(1) + " – " + built.temp[1].toFixed(1) + " °C",
+  ];
+  if (ring) {
+    lines.push("<br>cycle " + state.day + " — " + fmt(ring.startT));
+    lines.push("length " + ring.lengthH.toFixed(1) + " h" +
+      (ring.complete ? "" : ring.openedByWatering ? " (running)" : " (before first watering)"));
+    if (ring.shelf != null) lines.push("shelf " + ring.shelf.toFixed(1) + " counts");
+    if (ring.watering) {
+      lines.push("opened by a +" + ring.watering.rise.toFixed(0) + " count rise");
+    }
   }
-  el.innerHTML =
-    "cycles: " + n + "<br>" +
-    "moisture: " + built.moisture[0].toFixed(0) + " – " + built.moisture[1].toFixed(0) + "<br>" +
-    "temp: " + built.temp[0].toFixed(1) + " – " + built.temp[1].toFixed(1) + " °C<br>" +
-    "highlighted day " + state.day + " (" + when + ")";
+  if (backwardSteps) {
+    lines.push("<br><span style=\"color:#f2a93b\">" + backwardSteps +
+      " backward clock step" + (backwardSteps === 1 ? "" : "s") +
+      " in the log (NTP resync; rows kept in file order, not sorted)</span>");
+  }
+  el.innerHTML = lines.join("<br>");
 }
 
 // ---- controls wiring ----
+function syncPanel() {
+  // Cycle length only means anything in clock mode; the rise threshold and the
+  // phase-axis choice only mean anything in watering mode.
+  document.getElementById("rowCycleHours").hidden = state.cycleMode !== "clock";
+  document.getElementById("rowMinRise").hidden = state.cycleMode !== "watering";
+  document.getElementById("rowPhase").hidden = state.cycleMode !== "watering";
+}
+
+function redetect() {
+  waterings = RingLib.detectWaterings(rows, { minRise: state.minRise });
+}
+
 function bind() {
+  const mode = document.getElementById("cycleMode");
   const cyc = document.getElementById("cycleHours");
+  const rise = document.getElementById("minRise");
+  const frm = document.getElementById("frame");
+  const phs = document.getElementById("phase");
   const col = document.getElementById("colorBy");
   const sld = document.getElementById("daySlider");
   const avg = document.getElementById("showAvg");
   const dim = document.getElementById("dimOthers");
-  cyc.addEventListener("change", () => { state.cycleHours = Math.max(0.5, Number(cyc.value)); refreshSlider(); rebuild(); });
+  mode.addEventListener("change", () => {
+    state.cycleMode = mode.value; syncPanel(); refreshSlider(); rebuild();
+  });
+  cyc.addEventListener("change", () => {
+    state.cycleHours = Math.max(0.5, Number(cyc.value)); refreshSlider(); rebuild();
+  });
+  rise.addEventListener("change", () => {
+    state.minRise = Math.max(5, Number(rise.value)); redetect(); refreshSlider(); rebuild();
+  });
+  frm.addEventListener("change", () => { state.frame = frm.value; rebuild(); });
+  phs.addEventListener("change", () => { state.phase = phs.value; rebuild(); });
   col.addEventListener("change", () => { state.colorBy = col.value; rebuild(); });
   sld.addEventListener("input", () => { state.day = Number(sld.value); rebuild(); });
   avg.addEventListener("change", () => { state.showAvg = avg.checked; rebuild(); });
@@ -136,10 +195,9 @@ function bind() {
 }
 
 function refreshSlider() {
-  const tmp = RingLib.buildRings(rows, state.cycleHours * 3600);
   const sld = document.getElementById("daySlider");
-  sld.max = Math.max(0, tmp.rings.length - 1);
-  if (state.day > sld.max) { state.day = sld.max; sld.value = sld.max; }
+  sld.max = Math.max(0, computeRings().rings.length - 1);
+  if (state.day > Number(sld.max)) { state.day = Number(sld.max); sld.value = sld.max; }
 }
 
 function frameCamera() {
@@ -165,8 +223,15 @@ window.addEventListener("resize", () => {
 async function main() {
   const text = await (await fetch("data.csv")).text();
   rows = RingLib.parseCSV(text);
+  backwardSteps = RingLib.countBackwardSteps(rows);
+  redetect();
+  // Open on the most recent cycle -- the one still running is what you want to
+  // look at first.
   bind();
+  syncPanel();
   refreshSlider();
+  state.day = Number(document.getElementById("daySlider").max);
+  document.getElementById("daySlider").value = state.day;
   rebuild();
   frameCamera();
   animate();

@@ -1,0 +1,31 @@
+# @package experiment.config.eval_env_interface_args
+
+# `getgoodview_viewfinder_patch` with translation disabled on the view finder too,
+# so every episode starts from the pose the environment config specifies.
+#
+# The stock procedure translates until the object fills `good_view_percentage` of
+# the view finder. That is sensible when the question is recognition, and wrong when
+# the question is where the sensor went: the mug's silhouette is larger than the
+# glass's, because it has a handle, so the two objects reach that threshold at
+# different distances and their episodes begin 8.3 mm apart. `NaiveScanPolicy` then
+# runs an identical spiral from two different anchors, and steps near the silhouette
+# edge fall on the object in one run and off it in the other - 30 of the 36
+# apparent mug/glass disagreements on 2026-09-08 were that artifact rather than the
+# handle. Comparing the two runs step by step needs a common origin.
+#
+# The name deliberately differs from the upstream option this is based on. A file of
+# the same name in this directory would shadow tbp.monty's copy for every config that
+# requests it whenever --config-dir points here, which is invisible and would break
+# unrelated experiments.
+
+positioning_procedures:
+- _target_: tbp.monty.frameworks.environments.positioning_procedures.GetGoodViewFactory
+  agent_id: agent_id_0
+  sensor_id: view_finder
+  allow_translation: false
+  max_orientation_attempts: 0
+- _target_: tbp.monty.frameworks.environments.positioning_procedures.GetGoodViewFactory
+  agent_id: agent_id_0
+  sensor_id: patch
+  allow_translation: false
+  max_orientation_attempts: 0

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Soil moisture — stacked cycle rings</title>
+<title>Soil moisture — stacked dry-down rings</title>
 <style>
   :root { --bg:#0d141b; --panel:#161f29; --hair:#293643; --text:#e7edf2; --muted:#8a9aa8; --accent:#f2a93b; }
   * { box-sizing: border-box; }
@@ -28,10 +28,35 @@
 </head>
 <body>
 <div id="panel">
-  <h1>Stacked cycle rings</h1>
+  <h1>Stacked dry-down rings</h1>
   <div class="row">
+    <label>cycle boundary</label>
+    <select id="cycleMode">
+      <option value="watering">watering spike to spike</option>
+      <option value="clock">fixed clock length</option>
+    </select>
+  </div>
+  <div class="row" id="rowCycleHours" hidden>
     <label>cycle length (hours)</label>
     <input type="number" id="cycleHours" value="24" min="1" step="0.5">
+  </div>
+  <div class="row" id="rowMinRise">
+    <label>watering = rise over (counts)</label>
+    <input type="number" id="minRise" value="60" min="5" step="5">
+  </div>
+  <div class="row">
+    <label>reference frame</label>
+    <select id="frame">
+      <option value="absolute">absolute counts</option>
+      <option value="relative">relative to each cycle's shelf</option>
+    </select>
+  </div>
+  <div class="row" id="rowPhase">
+    <label>phase axis</label>
+    <select id="phase">
+      <option value="normalized">fraction of cycle (rings close)</option>
+      <option value="elapsed">hours since watering (shared scale)</option>
+    </select>
   </div>
   <div class="row">
     <label>color by</label>
@@ -39,18 +64,18 @@
       <option value="temp">temperature</option></select>
   </div>
   <div class="row">
-    <label>highlight day</label>
+    <label>highlight cycle</label>
     <input type="range" id="daySlider" min="0" max="0" value="0">
   </div>
   <div class="row inline">
-    <input type="checkbox" id="showAvg"><label style="margin:0;text-transform:none;letter-spacing:0">show "typical day" ring</label>
+    <input type="checkbox" id="showAvg"><label style="margin:0;text-transform:none;letter-spacing:0">show "typical cycle" ring</label>
   </div>
   <div class="row inline">
-    <input type="checkbox" id="dimOthers"><label style="margin:0;text-transform:none;letter-spacing:0">isolate highlighted day</label>
+    <input type="checkbox" id="dimOthers"><label style="margin:0;text-transform:none;letter-spacing:0">isolate highlighted cycle</label>
   </div>
   <div id="readout"></div>
 </div>
-<div id="hint">drag to orbit · scroll to zoom · radius = moisture, up = later days</div>
+<div id="hint">drag to orbit · scroll to zoom · radius = moisture, up = later cycles</div>
 
 <script src="rings.js"></script>
 <script type="importmap">

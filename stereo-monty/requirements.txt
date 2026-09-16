@@ -1,0 +1,7 @@
+# Everything the gate needs is already in a tbp.monty environment (numpy, torch,
+# habitat-sim). Nothing extra is required to reproduce the results.
+#
+# These two are only for rebuilding the object libraries from CAD, which is
+# optional - the built .glb files are committed under libraries/.
+cadquery   # cad/*.py, to export STLs
+numpy      # make_object_library.py, STL -> glb

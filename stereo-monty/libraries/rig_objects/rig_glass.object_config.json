@@ -1,0 +1,19 @@
+{
+  "render_asset": "rig_glass.glb",
+  "requires_lighting": true,
+  "scale": [
+    0.001,
+    0.001,
+    0.001
+  ],
+  "up": [
+    0,
+    0,
+    1
+  ],
+  "front": [
+    0,
+    1,
+    0
+  ]
+}

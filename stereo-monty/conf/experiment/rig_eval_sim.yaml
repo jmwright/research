@@ -1,0 +1,67 @@
+# @package _global_
+
+# Recognises the rig's objects in **simulation**, against the same library the real
+# captures are scored against.
+#
+# This exists as a control for one question. When a rig capture of the glass fails
+# to resolve, that could be the depth map or it could be the library: the glass is
+# the mug's body with the handle removed, so every point on a glass is also on a
+# mug. Running the same library in Habitat, where the depth is exact and the agent
+# walks the surface rather than saccading one static frame, separates the two. If
+# the glass fails here too, the rig is not the reason.
+#
+# It also answers the coverage question a turntable would ask, because the surface
+# agent moves around the object and each epoch is a different presented rotation.
+#
+# Matching is kept identical to conf/experiment/stereo_mug.yaml - same evidence
+# learning module, same graph config - so that the environment is the only thing
+# that differs. The sensor and motor system have to change, because a surface agent
+# in Habitat is not a patch saccading over a photograph.
+#
+#   python run.py --config-dir <this repo>/depth/monty/conf \
+#     experiment=rig_eval_sim \
+#     experiment.config.environment.env_init_args.data_path=$MONTY_DATA/rig_objects \
+#     'experiment.config.eval_env_interface_args.object_names=[rig_glass]' \
+#     experiment.config.model_name_or_path=<model>/pretrained/ \
+#     experiment.config.logging.output_dir=<results>
+
+defaults:
+  - /monty: graph_exp1000_emin_t3
+  - /monty/motor_system_config: surface_curvature_informed_goal1
+  - /monty/learning_module: evidence_1lm_nn10_dod003_dts02_gsg0
+  - /monty/sensor_module: camera_surf_rgba
+  - /monty/connectivity: 1lm_1sm
+  - /environment: habitat_numentalab_surf_agent
+  - /env_interface: eval_distinctobj_predefined
+  - /env_interface/transform: missing_depthto3d_sensor2_semantic0_clip
+  - /logging: basic_info_evidence_eval_runs
+
+experiment:
+  _target_: tbp.monty.frameworks.experiments.object_recognition_experiments.MontyObjectRecognitionExperiment
+  config:
+    show_sensor_output: false
+    max_train_steps: 1000
+    # The rig runs need thousands of steps once a near miss is in the library; do
+    # not inherit the stock 500 here or a truncation will look like a failure to
+    # discriminate. See the same note in stereo_mug.yaml.
+    max_eval_steps: 4000
+    max_total_steps: 40000
+    n_train_epochs: 3
+    n_eval_epochs: 3
+    model_name_or_path: ''
+    match_criterion:
+      _target_: tbp.monty.experiment.match_criteria.AnyLMsMatch
+      count: 1
+    seed: 42
+    supervised_lm_ids: []
+    eval_env_interface_args:
+      object_names:
+        - rig_glass
+      object_init_sampler:
+        _target_: tbp.monty.frameworks.environments.object_init_samplers.Predefined
+        rotations:
+          - [0, 0, 0]
+          - [0, 90, 0]
+          - [0, 180, 0]
+    logging:
+      run_name: rig_eval_sim
