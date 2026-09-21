@@ -1,5 +1,16 @@
 # Soil Logger + Stacked-Cycle-Ring Visualizer
 
+![Six dry-down cycles from the real log drawn as stacked rings, oldest at the
+bottom, in orthographic projection](images/visualizer.png)
+
+*Six cycles of the real log — five pours, plus the partial record before the
+first. Orthographic projection is the default because it draws every ring at
+the same scale: without it, rings low in the stack are foreshortened against
+rings high in it and a radius difference up the axis is part moisture, part
+camera. Color is each reading's distance from its own cycle's shelf, terracotta
+dry to blue wet, so it tracks progression around a ring instead of the
+between-cycle shelf step.*
+
 Three small pieces, end to end:
 
 1. **device/** — NodeMCU Amica (ESP8266 / MicroPython) firmware that samples the
@@ -8,10 +19,10 @@ Three small pieces, end to end:
 2. **client/** — a Python downloader that pulls the log to your laptop as CSV.
 3. **viz/** — a Node.js + Three.js visualizer that wraps the series into
    **stacked cycle rings**: phase goes *around* each ring, cycle number goes
-   *up* the stack. Moisture is the ring radius; color is moisture or
-   temperature. This is pure visualization — no prediction — so you can *see*
-   whether a cycle exists, how much it drifts, and how noisy it is, before
-   modeling anything.
+   *up* the stack. Moisture is the ring radius; color is shelf-relative
+   moisture, or temperature. This is pure visualization — no prediction — so
+   you can *see* whether a cycle exists, how much it drifts, and how noisy it
+   is, before modeling anything.
 
    A cycle can be sliced two ways. **Watering spike to watering spike** (the
    default) finds the pours in the signal and makes each ring one complete

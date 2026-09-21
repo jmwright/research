@@ -20,10 +20,17 @@
   input[type=number], select { width:100%; background:var(--bg); color:var(--text);
     border:1px solid var(--hair); border-radius:6px; padding:5px; }
   .inline { display:flex; align-items:center; gap:8px; }
+  .views { display:flex; gap:6px; }
+  .views button { flex:1; background:var(--bg); color:var(--text); cursor:pointer;
+    border:1px solid var(--hair); border-radius:6px; padding:5px 0; font-size:12px;
+    font-family:inherit; }
+  .views button:hover { border-color:var(--accent); color:var(--accent); }
   .inline input[type=checkbox] { accent-color:var(--accent); }
   #readout { color:var(--muted); font-size:11px; line-height:1.5; margin-top:8px;
     border-top:1px solid var(--hair); padding-top:8px; }
-  #hint { position:absolute; bottom:10px; left:12px; color:var(--muted); font-size:11px; z-index:10; }
+  /* Right-aligned: the panel grew tall enough to reach the bottom-left. */
+  #hint { position:absolute; bottom:10px; right:12px; text-align:right;
+    color:var(--muted); font-size:11px; z-index:10; }
 </style>
 </head>
 <body>
@@ -50,6 +57,21 @@
       <option value="absolute">absolute counts</option>
       <option value="relative">relative to each cycle's shelf</option>
     </select>
+  </div>
+  <div class="row">
+    <label>projection</label>
+    <select id="projection">
+      <option value="orthographic">orthographic (true scale)</option>
+      <option value="perspective">perspective</option>
+    </select>
+  </div>
+  <div class="row">
+    <label>snap view to axis</label>
+    <div class="views">
+      <button id="viewTop" title="Look straight down the drift axis">top</button>
+      <button id="viewFront" title="Look across the stack, drift axis vertical">front</button>
+      <button id="viewIso" title="Back to the default three-quarter view">iso</button>
+    </div>
   </div>
   <div class="row" id="rowPhase">
     <label>phase axis</label>
