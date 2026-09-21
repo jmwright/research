@@ -109,6 +109,64 @@ test("the rise threshold survives a noiseless signal", () => {
   assert.deepStrictEqual(R.detectWaterings(rows).map((x) => x.index), [200]);
 });
 
+test("a noise excursion before the pour does not become the boundary", () => {
+  /* A shelf that twitches once, well above the noise threshold, and falls
+     straight back -- then a real pour later. The old single-sample test took
+     the first reading over the line and put the boundary on the twitch. A pour
+     floods the probe and STAYS up, so the onset has to hold its level. */
+  const rows = [];
+  let t = 1700000000;
+  for (let i = 0; i < 120; i++) {
+    let m = 700 + (i % 2 ? 5 : -5);      // +-5 counts of deterministic chatter
+    // Inside the onset scan's reach (it sweeps back an hour from the step),
+    // or the detector never gets the chance to mistake it for the boundary.
+    if (i === 62) m = 790;               // one-sample excursion, +90
+    if (i >= 70) m = 900 - (i - 70) * 0.2;  // the pour, and it stays
+    rows.push([t, Math.round(m), 22]);
+    t += 300;
+  }
+  const w = R.detectWaterings(R.parseCSV(csv(rows)));
+  assert.strictEqual(w.length, 1, "expected one watering, got " + w.length);
+  assert.strictEqual(w[0].index, 70,
+    "boundary should sit on the sustained pour at 70, not the excursion at 62; got " + w[0].index);
+});
+
+test("an absorbed-on-contact pour is caught by the jump gate", () => {
+  /* What the real pours turned into. Early waterings left free water on the
+     probe for hours and moved a median; by 2026-09-17 the excursion was ONE
+     sample (732 -> 896) decaying inside half an hour to a shelf only ~23 counts
+     above the old one. The median step sees almost nothing, so without a
+     single-sample gate the detector stops finding waterings altogether. */
+  const rows = [];
+  let t = 1700000000;
+  for (let i = 0; i < 160; i++) {
+    let m = 700 + (i % 2 ? 6 : -6);
+    if (i === 80) m = 862;                      // the pour: +156 in one sample
+    else if (i > 80) m = 722 + (i % 2 ? 6 : -6);  // settles 22 counts higher
+    rows.push([t, Math.round(m), 22]);
+    t += 300;
+  }
+  const w = R.detectWaterings(R.parseCSV(csv(rows)));
+  assert.strictEqual(w.length, 1, "expected the pour to be found, got " + w.length);
+  assert.strictEqual(w[0].index, 80, "onset should be the jumping sample; got " + w[0].index);
+  assert.strictEqual(w[0].byJump, true, "should have qualified on the jump, not the median step");
+});
+
+test("the jump gate stays above the measured non-pour ceiling", () => {
+  /* Across 1,779 non-pour single-sample rises in the real log the largest is
+     82 counts. The gate is 100, so the worst real excursion must not fire it. */
+  const rows = [];
+  let t = 1700000000;
+  for (let i = 0; i < 160; i++) {
+    let m = 700 + (i % 2 ? 6 : -6);
+    if (i === 80) m = 788;                      // +82, the worst ever observed
+    rows.push([t, Math.round(m), 22]);
+    t += 300;
+  }
+  assert.strictEqual(R.detectWaterings(R.parseCSV(csv(rows))).length, 0,
+    "an 82-count excursion is noise, not a pour");
+});
+
 test("a flat series with no watering yields no cycles boundaries", () => {
   const rows = R.parseCSV(csv(synth(1, 400, 700, 0)));
   assert.strictEqual(R.detectWaterings(rows).length, 0);
@@ -193,9 +251,45 @@ test("phases stay inside [0,1] even with backward clock steps", () => {
 });
 
 test("segments split on gaps rather than drawing across them", () => {
-  const pts = [{ phase: 0.1 }, { phase: 0.2 }, { phase: 0.8 }, { phase: 0.9 }];
-  assert.strictEqual(R.segments(pts, 0.3).length, 2);
-  assert.strictEqual(R.segments(pts, 0.9).length, 1);
+  // Spacing is in SECONDS now, so the threshold is too: a 110 min hole in an
+  // otherwise 5 min record.
+  const t0 = 1788000000;
+  const pts = [0, 300, 600, 7200, 7500].map((d) => ({ t: t0 + d, phase: d / 7500 }));
+  assert.strictEqual(R.segments(pts, 1800).length, 2, "the hole should split the ring");
+  assert.strictEqual(R.segments(pts, 7200).length, 1, "a tolerance above it should not");
+});
+
+/* The regression this replaced a phase threshold to fix. Normalized phase
+   divides by the cycle's OWN span, so a fixed phase gap is a time gap that
+   shrinks with the cycle: on the 51-minute cycle opened by the 2026-09-20 pour
+   it came to 3.0 min, under the 5 min cadence. Every pair read as a gap, every
+   segment came out one point long, and app.js skips segments shorter than two
+   -- so the ring holding the newest watering drew nothing at all while the
+   readout panel still reported it. Clock mode divided by 86400 and was fine,
+   which is exactly how the bug presented: visible in one frame, absent in the
+   other. */
+test("a freshly-opened cycle still draws as one segment", () => {
+  const t0 = 1788000000;
+  const pts = [];
+  for (let i = 0; i < 11; i++) pts.push({ t: t0 + i * 300, phase: i / 10 });
+  const segs = R.segments(pts);
+  assert.strictEqual(segs.length, 1, "51 minutes at a 5 min cadence is not a gap");
+  assert.ok(segs[0].length >= 2, "a one-point segment cannot be drawn");
+});
+
+// The same ring, at the slower cadence the timebase fault produced, must also
+// survive -- which is why the default is a multiple of the ring's own spacing
+// and not one tuned number.
+test("the gap default follows the cadence", () => {
+  const t0 = 1788000000;
+  const slow = [];
+  for (let i = 0; i < 11; i++) slow.push({ t: t0 + i * 460, phase: i / 10 });
+  assert.strictEqual(R.segments(slow).length, 1, "460 s spacing is not a gap either");
+
+  const hourly = [];
+  for (let i = 0; i < 11; i++) hourly.push({ t: t0 + i * 3600, phase: i / 10 });
+  assert.strictEqual(R.segments(hourly).length, 1,
+    "an hourly log should not be shattered by a 30 min floor");
 });
 
 test("averageRing bins in the active frame", () => {
@@ -225,26 +319,74 @@ if (fs.existsSync(REAL)) {
   console.log("real log (" + REAL + ")");
   const rows = R.parseCSV(fs.readFileSync(REAL, "utf8"));
 
-  test("finds both recorded waterings and nothing else", () => {
-    const w = R.detectWaterings(rows);
-    assert.strictEqual(w.length, 2, "expected exactly 2 waterings, got " + w.length);
+  /* The board is still logging, so anything asserted about "the whole record"
+     rots the moment it is watered again. These bound themselves to the span
+     the log book covers and ignore what comes after. */
+  const BOOK_END = Date.parse("2026-09-16T00:00:00Z") / 1000;
+
+  test("finds every watering in the log book span and nothing else", () => {
+    // Detection runs on the FULL record -- including the stretched-cadence
+    // stretch -- and only the assertion is bounded.
+    const w = R.detectWaterings(rows).filter((x) => x.t < BOOK_END);
+    assert.strictEqual(w.length, 3, "expected 3 waterings, got " + w.length);
     const when = w.map((x) => new Date(x.t * 1000).toISOString().slice(0, 16));
-    // log book: 2026-09-06 12:13, and 2026-09-10 between 21:28:33 and 21:33:32
-    assert.strictEqual(when[0], "2026-09-06T12:13");
-    assert.strictEqual(when[1], "2026-09-10T21:33");
+    /* log book: 2026-09-06 12:13; 2026-09-10 between 21:28:33 and 21:33:32;
+       2026-09-14 14:11, the +179 count pour. The last of those is the one the
+       sample-windowed detector put at 12:56, 75 minutes early, on a noise
+       excursion that fell straight back. */
+    assert.deepStrictEqual(when,
+      ["2026-09-06T12:13", "2026-09-10T21:33", "2026-09-14T14:11"]);
+  });
+
+  test("boundaries survive a change of logging cadence", () => {
+    /* This is the regression that matters. A firmware timebase fault stretched
+       the sample interval from 300 s to 460 s for two days in September 2026,
+       and the detector's windows used to be counted in SAMPLES -- so the onset
+       scan swept one hour of record at the fast cadence and three at a slow
+       one, and the 09-14 boundary moved 3.3 h depending on how often the board
+       happened to be logging. Thin the record out and every boundary must hold
+       to within a sample interval. */
+    const thin = (dt) => {
+      const out = []; let edge = rows[0].t;
+      for (const r of rows) if (r.t >= edge) { out.push(r); edge = r.t + dt; }
+      return out;
+    };
+    const base = R.detectWaterings(rows).filter((x) => x.t < BOOK_END).map((x) => x.t);
+    for (const dt of [600, 900, 1200]) {
+      const rs = thin(dt);
+      const w = R.detectWaterings(rs).filter((x) => x.t < BOOK_END);
+      assert.strictEqual(w.length, base.length,
+        "at " + dt + "s cadence: expected " + base.length + " waterings, got " + w.length);
+      const gaps = [];
+      for (let i = 1; i < rs.length; i++) if (rs[i].t > rs[i - 1].t) gaps.push(rs[i].t - rs[i - 1].t);
+      const tol = R.median(gaps) * 1.5;
+      w.forEach((x, k) => {
+        assert.ok(Math.abs(x.t - base[k]) <= tol,
+          "at " + dt + "s cadence, boundary " + k + " moved " +
+          Math.round(Math.abs(x.t - base[k]) / 60) + " min (tolerance " +
+          Math.round(tol / 60) + " min)");
+      });
+    }
   });
 
   test("cycle lengths and shelves match the offline analysis", () => {
     const cycles = R.buildCyclesFromWaterings(rows, R.detectWaterings(rows));
-    assert.strictEqual(cycles.length, 3);
+    // The trailing partial splits again with every new pour, so assert on the
+    // closed cycles rather than on the total count.
+    assert.ok(cycles.length >= 4, "expected at least 4 cycles, got " + cycles.length);
     const len = (c) => (c.endT - c.startT) / 3600;
     assert.ok(Math.abs(len(cycles[1]) - 105.3) < 0.5, "cycle 2 should run ~105 h");
-    // block-bootstrapped medians from the Python analysis: 718 and 761
-    assert.ok(Math.abs(R.cycleShelf(cycles[1]) - 718) < 6, "cycle 2 shelf ~718");
-    assert.ok(Math.abs(R.cycleShelf(cycles[2]) - 761) < 6, "cycle 3 shelf ~761");
+    /* Block-bootstrapped medians from the Python analysis were 718 and 761.
+       The first still measures 717. The second now measures 755: when 761 was
+       computed that cycle was still running, and it has since closed at the
+       09-14 pour, so the estimate covers more of its own drying tail. The
+       shelf is not a constant of the pot -- that is the point of the relative
+       frame -- so the figure moving with the cycle's extent is expected. */
+    assert.ok(Math.abs(R.cycleShelf(cycles[1]) - 717) < 6, "cycle 2 shelf ~717");
+    assert.ok(Math.abs(R.cycleShelf(cycles[2]) - 755) < 6, "cycle 3 shelf ~755");
   });
 
-  test("the relative frame collapses the 42-count shelf step", () => {
+  test("the relative frame collapses the 38-count shelf step", () => {
     const cycles = R.buildCyclesFromWaterings(rows, R.detectWaterings(rows));
     const rel = R.buildRings(cycles, { frame: "relative" });
     const tail = (r) => {
@@ -253,6 +395,23 @@ if (fs.existsSync(REAL)) {
     };
     assert.ok(Math.abs(tail(rel.rings[1]) - tail(rel.rings[2])) < 8,
       "cycle 2 and cycle 3 tails should overlay once each is measured against its own shelf");
+  });
+
+  /* End-to-end guard for the gap-units bug, in the shape the renderer sees it.
+     The trailing ring is minutes old right after a pour, which is precisely
+     when someone goes looking for it, so "every ring draws" has to hold in
+     both phase modes and not just for the long closed ones. */
+  test("every ring draws in both phase modes, including the running one", () => {
+    const cycles = R.buildCyclesFromWaterings(rows, R.detectWaterings(rows));
+    for (const phase of ["normalized", "elapsed"]) {
+      const built = R.buildRings(cycles, { phase: phase });
+      built.rings.forEach((ring, i) => {
+        const drawable = R.segments(ring.points).filter((seg) => seg.length >= 2);
+        assert.ok(drawable.length > 0,
+          phase + " phase: ring " + i + " (" + ring.lengthH.toFixed(2) +
+          " h, " + ring.points.length + " points) contributed no drawable segment");
+      });
+    }
   });
 }
 

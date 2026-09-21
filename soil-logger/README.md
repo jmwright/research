@@ -111,14 +111,15 @@ reports the backward-step count instead of hiding it.
 
 ## What was tested, and what wasn't
 
-Verified here (`cd viz && npm test` — 22 assertions, no framework): the
+Verified here (`cd viz && npm test` — 29 assertions, no framework): the
 downloader round-trips a log over TCP byte-for-byte; the server serves the page,
 `rings.js`, `app.js` and the CSV. For `viz/public/rings.js` the tests cover
 file-order preservation and backward-step counting, the noise estimator, spike
 detection (position of the boundary, the refractory window, the `minRise` gate,
 and a noiseless signal), watering-to-watering slicing with partial cycles at
 each end, shelf estimation, both reference frames, both phase axes, phase
-staying in range across a backward clock step, gap splitting, the average ring,
+staying in range across a backward clock step, gap splitting in seconds
+(including that a freshly-opened cycle still draws), the average ring,
 and empty input. When `soil_log.csv` is present the suite also asserts against
 the real record: that detection finds exactly the two waterings in the log book
 at the right samples, and that the recovered cycle length and shelves match the

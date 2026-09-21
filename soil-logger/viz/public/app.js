@@ -4,7 +4,6 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 const BASE_R = 5.0;         // ring radius at minimum moisture
 const R_SCALE = 3.0;        // how much moisture expands the radius
 const H = 1.3;              // vertical spacing between day rings
-const GAP = 0.06;           // phase gap above which we break the line (a data gap)
 const AVG_BINS = 64;
 
 let rows = [];              // parsed CSV, in file order
@@ -80,7 +79,9 @@ function rebuild() {
     const highlighted = idx === state.day;
     const opacity = state.dimOthers && !highlighted ? 0.08 : (highlighted ? 1.0 : 0.7);
     const lw = highlighted ? 2 : 1;
-    for (const seg of RingLib.segments(ring.points, GAP)) {
+    // No threshold passed: segments() sizes the gap from this ring's own
+    // cadence. A fixed one here could not, and shattered short rings.
+    for (const seg of RingLib.segments(ring.points)) {
       if (seg.length < 2) continue;
       const pos = [], col = [];
       for (const p of seg) {
