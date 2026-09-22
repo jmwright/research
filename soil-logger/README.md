@@ -88,7 +88,7 @@ Controls:
   each cycle's shelf* subtracts the settled level that each cycle reaches after
   drainage, so cycles whose shelves sit at different absolute levels can be
   compared by shape. **This matters more than it sounds**: in the real log the
-  post-drainage shelf moved 718 → 761 counts between two consecutive cycles, so
+  post-drainage shelf moved 717 → 755 counts between two consecutive cycles, so
   in the absolute frame the later ring is simply fatter and you cannot see that
   the two dry-downs are otherwise the same. In the relative frame they overlay.
 - **phase axis** (watering mode) — *fraction of cycle* makes every ring close,
@@ -96,10 +96,31 @@ Controls:
   on one shared time axis, so a short cycle visibly falls short of closing and
   you can compare *when* things happen (when drainage ends, when the shelf
   starts).
-- **color by** moisture/temp, **highlight cycle**, **typical cycle ring**
-  (per-phase average as a white reference loop), **isolate highlighted cycle**.
+- **projection** — *orthographic* (the default) draws every ring at the same
+  scale; *perspective* is the ordinary 3D view. This is what makes drift
+  readable: under perspective a ring's drawn size depends on its distance from
+  the eye, so rings low in the stack are foreshortened against rings high in it
+  and a radius difference up the axis is part moisture, part camera.
+  Orthographic drops that term. Toggling preserves the view rather than
+  resetting it, so you can flip between the two and see which features survive.
+- **snap view to axis** — *top* looks straight down the drift axis with the
+  rings superimposed, so radius drift from cycle to cycle reads as concentric
+  spacing; *front* looks across the stack with the drift axis vertical; *iso*
+  returns to the opening three-quarter view. Orbiting to exactly down-axis by
+  hand is not really possible, and *near*-axis is the case that misleads — a
+  ring is then drawn as a thin ellipse and its radius reads short.
+- **color by** — *moisture* colors each reading by its distance from **its own
+  cycle's shelf**, whatever reference frame the geometry is drawn in, so color
+  tracks progression around a ring instead of the between-cycle shelf step. The
+  ramp is stretched over the p2–p90 band of those values, so the drainage
+  transient saturates at the wet end rather than eating a fifth of the scale
+  for 1% of the samples; the panel reports the active band. *temp* colors by
+  temperature over its full range.
+- **highlight cycle**, **typical cycle ring** (per-phase average as a white
+  reference loop), **isolate highlighted cycle**.
 
-Drag to orbit, scroll to zoom.
+Drag to orbit, scroll to zoom, or use the snap buttons for an exactly
+axis-aligned view.
 
 What to look for: a stable rhythm makes every ring alike (a smooth tube); drift
 (a plant growing thirstier) makes the rings change as you climb; data gaps show
@@ -122,22 +143,34 @@ reports the backward-step count instead of hiding it.
 
 ## What was tested, and what wasn't
 
-Verified here (`cd viz && npm test` — 29 assertions, no framework): the
-downloader round-trips a log over TCP byte-for-byte; the server serves the page,
-`rings.js`, `app.js` and the CSV. For `viz/public/rings.js` the tests cover
-file-order preservation and backward-step counting, the noise estimator, spike
-detection (position of the boundary, the refractory window, the `minRise` gate,
-and a noiseless signal), watering-to-watering slicing with partial cycles at
+Verified here (`cd viz && npm test` — 29 assertions, no framework): everything
+the suite covers lives in `viz/public/rings.js`. It tests file-order
+preservation and backward-step counting, the noise estimator, spike detection
+(position of the boundary, the refractory window, the `minRise` gate, a
+noiseless signal, and that the worst non-pour excursion in the record — 82
+counts — does not fire it), watering-to-watering slicing with partial cycles at
 each end, shelf estimation, both reference frames, both phase axes, phase
 staying in range across a backward clock step, gap splitting in seconds
-(including that a freshly-opened cycle still draws), the average ring,
-and empty input. When `soil_log.csv` is present the suite also asserts against
-the real record: that detection finds exactly the two waterings in the log book
-at the right samples, and that the recovered cycle length and shelves match the
-offline analysis. The device firmware is syntax-checked but needs the real board
-+ sensor to run. The Three.js
-**3D rendering itself was not run headlessly** (no browser/WebGL in the build
-environment) — the data pipeline feeding it is tested, but eyeball the first
+(including that a freshly-opened cycle still draws), the average ring, and
+empty input.
+
+When `soil_log.csv` is present the suite also asserts against the real record,
+bounded to the span the log book covers — the book ends 2026-09-16 and the
+board is still logging, so anything asserted about "the whole record" would rot
+at the next pour. Those tests: that detection finds exactly the three in-book
+waterings, at the right timestamps and nothing else; that the same boundaries
+**survive a change of logging cadence**, which is the regression that matters,
+because a firmware timebase fault stretched the sample interval from 300 s to
+460 s for two days and moved the 09-14 boundary by 3.3 h back when the
+detector's windows were counted in samples rather than seconds; and that the
+recovered cycle length (~105 h) and shelves (~717 and ~755 counts) match the
+offline analysis.
+
+Not covered by any automated test: the downloader and the server. The device
+firmware is syntax-checked but needs the real board + sensor to run. The
+Three.js **3D rendering itself was not run headlessly** (no browser/WebGL in
+the build environment), and neither are the camera and color paths in
+`app.js` — the data pipeline feeding them is tested, but eyeball the first
 render and adjust `BASE_R` / `R_SCALE` / `H` at the top of `app.js` to taste.
 
 The visualizer loads Three.js from a CDN (jsdelivr), so the page needs internet

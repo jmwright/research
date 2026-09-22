@@ -24,7 +24,7 @@ let built = null;
 let waterings = [];
 let backwardSteps = 0;
 let ringGroup, avgGroup;
-let colorRange = null;   // the band color is stretched over; see quantileRange()
+let anchors = null;      // value->color stops in use; see rampColor()
 
 // ---- scene ----
 const scene = new THREE.Scene();
@@ -112,31 +112,70 @@ function setProjection(kind) {
   controls.update();
 }
 
-/* Dry soil reads desert-sunset terracotta, wet soil reads blue, bridged by a
-   cool slate -- the only honest path between two hues, since any other route
-   from 50 deg to 258 deg goes through green. Chroma bottoms out at .05 rather
-   than neutral so the bridge reads as a color, not as mud. Lightness rises
-   .535 -> .684, wide enough to separate the stops but not so wide that the
-   wettest samples -- the noisiest ones, and the drainage phase the shelf
-   calculation discards -- become the brightest thing on screen. Every stop
-   clears 3:1 on the #0d141b background (3.4:1 at the dry end, 6.5:1 at the wet).
+/* The colour ramp is CALIBRATED, not adaptive: every stop is pinned to a fixed
+   offset from the cycle's own shelf, so a given colour always means the same
+   thing -- on any cycle, on any day, as the log grows. That matters now that
+   the ramp carries a decision. The previous p2-p90 band moved as data arrived,
+   so "red" would have drifted to a different offset every time the board
+   logged; a threshold you can see has to sit still.
 
-   NB: this ramp is only half the discriminability story. norm() spreads it
-   linearly over built.value, which is a raw [min, max]; on the real log that
-   puts 75% of samples inside 13-15% of the ramp, which no choice of stops can
-   fix. That is a normalization question, not a palette one, and still open. */
-const SOIL_STOPS = [[0.655,0.322,0.090], [0.655,0.388,0.149], [0.616,0.514,0.388],
-                    [0.467,0.569,0.675], [0.357,0.592,0.859], [0.349,0.600,0.973]];
-// Temperature keeps its own cool->warm ramp; hot must not come out blue.
+   Red is anchored on where Jeremy has actually watered. The four firings came
+   at -8, -9, -15 and -4 counts below their own shelves, so the warm half spans
+   that observed range rather than asserting one threshold: -4 is the earliest
+   he has ever watered, -15 the latest, and -18 is past all of it. The gradient
+   therefore says "you are in the zone where you have historically watered, and
+   this is how deep in" -- which is what four samples support. A hard line at a
+   single count would be claiming a constant that has moved every cycle.
+
+   Aggressive on purpose. Between the shelf and -15 this spends ~3.7% of the
+   ramp per count against 0.84% before, because the decision lives in 4-15
+   counts out of a 362-count range. That amplifies scatter by the same factor:
+   on the four pre-flash cycles, where scatter vs a 6 h trend is 16.3 counts,
+   the rings will look rough. Deliberate -- post-flash scatter is 6.7 and at
+   ~69 h per cycle every ring on screen is post-flash within two weeks, so this
+   is set for the regime the instrument is moving into, not the one it is
+   leaving. Lightness rises .52 -> .70 and every stop clears 3:1 on #0d141b
+   (3.10 at the red end, 6.90 at the wet). */
+const SOIL_ANCHORS = [
+  [-18, [0.710, 0.208, 0.176]],   // past every firing so far
+  [-15, [0.812, 0.231, 0.114]],   // latest he has watered
+  [-10, [0.812, 0.337, 0.016]],   // middle of the firing band
+  [ -4, [0.761, 0.463, 0.153]],   // earliest he has watered
+  [  0, [0.682, 0.565, 0.392]],   // the shelf itself
+  [ 30, [0.502, 0.616, 0.698]],   // still draining
+  [100, [0.349, 0.627, 0.976]],   // just poured
+];
+
+// Temperature has no calibrated anchors -- no decision hangs off it -- so its
+// stops stay evenly spread over whatever range the record holds. Cool->warm:
+// hot must not come out blue.
 const TEMP_STOPS = [[0.03,0.20,0.55], [0.13,0.60,0.75], [0.30,0.70,0.40],
                     [0.95,0.80,0.25], [0.80,0.25,0.20]];
 
-function colormap(x, stops) {
-  x = Math.max(0, Math.min(1, x));
-  const s = x * (stops.length - 1);
-  const i = Math.floor(s), f = s - i;
-  const a = stops[i], b = stops[Math.min(stops.length - 1, i + 1)];
-  return new THREE.Color(a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f);
+/* Interpolate anchors given in VALUE space, clamping past either end. Clamping
+   is the point at both ends: below -18 there is nothing more urgent to say, and
+   the pour transient runs ~200 counts above the shelf but is 1.3% of samples
+   and drains out within hours, so it saturates at one blue instead of eating
+   the scale. */
+function rampColor(v, anchors) {
+  if (v == null) return new THREE.Color(anchors[0][1][0], anchors[0][1][1], anchors[0][1][2]);
+  if (v <= anchors[0][0]) { const c = anchors[0][1]; return new THREE.Color(c[0], c[1], c[2]); }
+  const last = anchors[anchors.length - 1];
+  if (v >= last[0]) return new THREE.Color(last[1][0], last[1][1], last[1][2]);
+  for (let i = 1; i < anchors.length; i++) {
+    if (v <= anchors[i][0]) {
+      const [av, a] = anchors[i - 1], [bv, b] = anchors[i];
+      const f = (v - av) / (bv - av);
+      return new THREE.Color(a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f);
+    }
+  }
+}
+
+// Spread position-space stops evenly across a measured range, so the same
+// interpolator serves the uncalibrated temperature ramp.
+function evenAnchors(stops, range) {
+  const lo = range[0], hi = range[1] > range[0] ? range[1] : range[0] + 1;
+  return stops.map((c, i) => [lo + (hi - lo) * i / (stops.length - 1), c]);
 }
 
 function norm(v, range) {
@@ -147,8 +186,8 @@ function norm(v, range) {
 
 /* What color encodes: always the reading's distance from its OWN cycle's
    shelf, whatever frame the geometry is drawn in. Raw counts carry the
-   between-cycle shelf step -- 123 counts across this log, against a color band
-   only ~200 wide -- which swamps the within-cycle dry-down and makes color read
+   between-cycle shelf step -- 123 counts across this log, against a decision
+   band of 4-15 -- which swamps the within-cycle dry-down and makes color read
    as the stacking axis instead of as progression around the ring. cycleShelf
    exists for exactly this; the relative frame already subtracts it for the
    geometry, and this does the same for color unconditionally. Points keep raw
@@ -159,31 +198,6 @@ function colorValue(ring, p) {
   if (state.colorBy === "temp") return p.temp;
   if (p.moisture == null) return p.value;
   return ring.shelf != null ? p.moisture - ring.shelf : p.value;
-}
-
-function colorValues(rings) {
-  const xs = [];
-  for (const ring of rings) {
-    for (const p of ring.points) {
-      const v = colorValue(ring, p);
-      if (v != null) xs.push(v);
-    }
-  }
-  return xs;
-}
-
-/* The band to stretch the ramp over, as quantiles of the values actually
-   colored. A raw [min, max] is the wrong instrument here for the same reason
-   cycleShelf ignores the drainage phase: the pour transient is a different
-   regime, ~200 counts above the shelf but 1.3% of samples, and it was taking a
-   fifth of the ramp while 75% of the readings crowded into 15% of it. norm()
-   may return outside [0,1] for the clipped tails; colormap() clamps. */
-function quantileRange(xs, loQ, hiQ) {
-  if (!xs.length) return [0, 1];
-  const s = xs.slice().sort((a, b) => a - b);
-  const at = (q) => s[Math.min(s.length - 1, Math.max(0, Math.round(q * (s.length - 1))))];
-  const lo = at(loQ), hi = at(hiQ);
-  return hi > lo ? [lo, hi] : [s[0], s[s.length - 1]];
 }
 
 function pointXYZ(phase, value, cycleIdx, nCycles) {
@@ -211,11 +225,12 @@ function rebuild() {
 
   built = computeRings();
   const n = built.rings.length;
-  // Temperature is near-uniform across its own range -- no transient to crowd
-  // it -- so it keeps the full span; clipping it would just bin its top decile.
-  colorRange = state.colorBy === "temp"
-    ? built.temp
-    : quantileRange(colorValues(built.rings), 0.02, 0.90);
+  // Moisture anchors are absolute offsets from the shelf, so they need nothing
+  // from the data. Temperature carries no decision, so it just spreads its
+  // stops across whatever range the record holds.
+  anchors = state.colorBy === "temp"
+    ? evenAnchors(TEMP_STOPS, built.temp)
+    : SOIL_ANCHORS;
 
   built.rings.forEach((ring, idx) => {
     const highlighted = idx === state.day;
@@ -230,8 +245,7 @@ function rebuild() {
         const v = colorValue(ring, p);
         const [x, y, z] = pointXYZ(p.phase, p.value, idx, n);
         pos.push(x, y, z);
-        const c = colormap(norm(v, colorRange),
-                           state.colorBy === "temp" ? TEMP_STOPS : SOIL_STOPS);
+        const c = rampColor(v, anchors);
         col.push(c.r, c.g, c.b);
       }
       const g = new THREE.BufferGeometry();
@@ -280,9 +294,8 @@ function updateReadout() {
     "cycles: " + n + (state.cycleMode === "watering" ? " (" + waterings.length + " waterings found)" : ""),
     "radius: " + built.value[0].toFixed(0) + " – " + built.value[1].toFixed(0) + unit,
     "color: " + (state.colorBy === "temp"
-      ? colorRange[0].toFixed(1) + " – " + colorRange[1].toFixed(1) + " °C (full)"
-      : colorRange[0].toFixed(0) + " – " + colorRange[1].toFixed(0) +
-        " counts vs shelf (p2–p90; wetter clips)"),
+      ? built.temp[0].toFixed(1) + " – " + built.temp[1].toFixed(1) + " °C (full range)"
+      : "red at −18, shelf at 0, +100 counts vs shelf (fixed)"),
     "temp: " + built.temp[0].toFixed(1) + " – " + built.temp[1].toFixed(1) + " °C",
   ];
   if (ring) {
